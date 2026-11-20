@@ -29,7 +29,7 @@ func healthcheck(args []string) error {
 	c := &http.Client{Timeout: 3 * time.Second}
 	res, err := c.Get(base + "/")
 	if err != nil {
-		return fmt.Errorf("no gateway at %s: %w", base, err)
+		return fmt.Errorf("gateway at %s did not answer: %w; run magpie status --json --addr %q for listener details", base, err, strings.TrimPrefix(base, "http://"))
 	}
 	defer res.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(res.Body, 4096))

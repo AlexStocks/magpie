@@ -429,13 +429,21 @@ func ServedBy() Served { return ServedAt(URL()) }
 
 // servedAt is ServedBy for the magpie at base.
 func ServedAt(base string) Served {
+	s, _ := ProbeAt(base)
+	return s
+}
+
+// ProbeAt asks which magpie answers at base and keeps a failed request's
+// error for an explicit status check. A failure to reach it says nothing
+// about whether a process still listens on its port.
+func ProbeAt(base string) (Served, error) {
 	c := &http.Client{Timeout: 700 * time.Millisecond}
 	res, err := c.Get(base + "/")
 	if err != nil {
-		return Served{}
+		return Served{}, err
 	}
 	defer res.Body.Close()
-	b, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+	b, readErr := io.ReadAll(io.LimitReader(res.Body, 64<<10))
 	var info struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
@@ -444,9 +452,16 @@ func ServedAt(base string) Served {
 		Serves  string `json:"serves"`
 	}
 	if decodeJSON(b, &info) != nil || info.Name != "magpie" {
-		return Served{Running: bodyHas(b, `"magpie"`), Window: bodyHas(b, `"window":true`)}
+		s := Served{Running: bodyHas(b, `"magpie"`), Window: bodyHas(b, `"window":true`)}
+		if readErr != nil {
+			return s, readErr
+		}
+		if !s.Running {
+			return s, fmt.Errorf("%s answers %s, not as a magpie gateway", base, res.Status)
+		}
+		return s, nil
 	}
-	return Served{Running: true, Window: info.Window, Version: info.Version, Pid: info.Pid, Serves: info.Serves}
+	return Served{Running: true, Window: info.Window, Version: info.Version, Pid: info.Pid, Serves: info.Serves}, readErr
 }
 
 // ServedBusy is what the magpie serving the gateway has in flight, as its

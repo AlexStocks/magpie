@@ -23,6 +23,11 @@ type status struct {
 	// File is where the running magpie writes this down for a program that
 	// reads files (a watchdog)
 	File string `json:"file"`
+	// A failed HTTP probe remains unhealthy even when a local process
+	// owns the port. Keep that evidence apart from the gateway's reply.
+	Error    string          `json:"error,omitempty"`
+	Listener *statusListener `json:"listener,omitempty"`
+	Hint     string          `json:"hint,omitempty"`
 }
 
 // statusUsage is magpie status --help.
@@ -31,6 +36,8 @@ const statusUsage = `usage: magpie status [--json] [--addr host:port]
   serve or tui), process id, version and listen address. magpie.exe tray and
   magpie.exe mcp image are one image name; the pid here is the one that serves.
   --json prints one JSON object (running false when none answers), for a watchdog.
+  When a request fails it also reports the error and, for a loopback address,
+  the process seen listening on that TCP port. A listener is not a healthy gateway.
   The running magpie also keeps the same in gateway.json in magpie's config folder
   while it serves. It looks where --addr says, else at MAGPIE_ADDR, else where the
   running magpie wrote down that it listens, else at the port in Settings' Gateway
@@ -52,11 +59,17 @@ func statusCmd(args []string) error {
 	}
 	st := status{URL: base, File: gateway.ListeningPath()}
 	st.Addr = base[len("http://"):]
-	if o := gateway.ServedAt(base); o.Running {
+	o, probeErr := gateway.ProbeAt(base)
+	if probeErr != nil {
+		st.Error = probeErr.Error()
+	}
+	if o.Running {
 		st.Running, st.Role, st.Pid, st.Version = true, o.Serves, o.Pid, o.Version
 		if l, ok := gateway.ReadListening(); ok && l.Pid == o.Pid {
 			st.Addr, st.Started = l.Addr, l.Started
 		}
+	} else {
+		st.Listener, st.Hint = statusListenerAt(base, probeErr)
 	}
 	if asJSON {
 		b, err := json.MarshalIndent(st, "", "  ")
@@ -68,6 +81,19 @@ func statusCmd(args []string) error {
 	}
 	if !st.Running {
 		fmt.Println(amber.Render("○"), "no magpie answers on", st.URL)
+		if l := st.Listener; l != nil {
+			name := l.Name
+			if name == "" {
+				name = "a process"
+			}
+			fmt.Printf("  TCP port %d is held by %s (pid %d)\n", l.Port, name, l.PID)
+		}
+		if st.Error != "" {
+			fmt.Println(" ", st.Error)
+		}
+		if st.Hint != "" {
+			fmt.Println(" ", st.Hint)
+		}
 		return nil
 	}
 	line := "magpie " + st.Version + " serves the gateway on " + bold.Render(st.Addr)
@@ -78,5 +104,8 @@ func statusCmd(args []string) error {
 		line += " · pid " + strconv.Itoa(st.Pid)
 	}
 	fmt.Println(green.Render("●"), line)
+	if st.Error != "" {
+		fmt.Println(" ", st.Error)
+	}
 	return nil
 }

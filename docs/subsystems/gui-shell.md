@@ -42,6 +42,31 @@ three.
 
 ## Constraints and failure behavior
 
+### Gateway reachability from the command line
+
+`magpie status` and `status --json` keep `running` as whether a magpie
+gateway answers the HTTP probe, not whether a process exists. A failed
+probe includes its `error`, even when partial response bytes identify magpie
+and preserve the legacy `running: true` result. For a loopback target only,
+the status command
+also asks the OS which process holds the requested TCP port and reports
+that as `listener` (`port`, `pid`, `name`, `magpie`). An unknown or
+unreadable holder is omitted; a saved `gateway.json` is not proof that its
+process is still listening. A listener may be bound on another interface,
+so its presence does not establish that the requested address is reachable.
+
+When the holder is magpie and the TCP connection fails, `hint` suggests
+checking its listen address and local firewall or security rules; it does
+not claim that a timeout proves a firewall block. A read failure instead
+points to the address and gateway logs. An HTTP client deadline that does
+not identify the failed operation leaves both possibilities in the hint.
+Successful probes do not
+run the process lookup. `healthcheck` stays unhealthy on a failed request
+and points to `status --json --addr` for that same target, without adding a
+process lookup to the watchdog path. See [`ProbeAt`](../../internal/gateway/gateway.go),
+[`statusCmd`](../../internal/cli/status_cli.go) and
+[`statusListenerAt`](../../internal/cli/status_listener.go).
+
 ### First opening of an agent's Details
 
 In the main window, `expandLink` in
